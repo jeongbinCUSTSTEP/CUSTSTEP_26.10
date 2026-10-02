@@ -320,7 +320,7 @@ body.self .tabbar{display:none}
   <header class="top">
     <span class="brand">CUSTSTEP</span>
     <div style="display:flex;gap:8px">
-      <button class="tag staffOnly hidden" id="dashBtn" onclick="show('dash')">대시보드</button>
+      <button class="tag staffOnly" id="dashBtn" onclick="openDash()">대시보드</button>
       <button class="tag staffOnly" onclick="enterSelf()">셀프 모드</button>
       <button class="tag on selfOnly" onclick="askExitSelf()">셀프 모드 · 종료</button>
     </div>
@@ -518,7 +518,7 @@ body.self .tabbar{display:none}
     <div class="set">
       <div class="hd">기기</div>
       <div class="it btnIt" id="instItem" onclick="doInstall()">📲 홈 화면에 앱 설치하기</div>
-      <div class="it btnIt" onclick="show('dash')">📊 대시보드 · TV 모드</div>
+      <div class="it btnIt" onclick="openDash()">📊 대시보드 · TV 모드</div>
       <div class="it btnIt" onclick="exportCSV()">⬇️ CSV 내보내기</div>
       <div class="it btnIt" onclick="setPin()">🔒 셀프 모드 PIN 변경</div>
       <div class="it btnIt" style="color:#9B2C1C" onclick="askWipe()">이 기기의 데이터 전체 삭제</div>
@@ -545,8 +545,9 @@ body.self .tabbar{display:none}
  * 엔진(카메라·가이드 크롭·OCR·시트 동기화)은 Belle issaC scan v6b 그대로,
  * 흐름(S1~S6 · D0/D+3/D+7/D+14 · 공직자 준법)은 CUSTSTEP 디자인 스펙 v0.4
  * ===================================================================== */
-var VERSION = 'v1-261002';
+var VERSION = 'v2-261002';
 /* ★ 배포 후 jeongbin 웹앱 주소(…/exec)를 여기에 넣으면, 링크만 받은 사람도 바로 대표님 시트·드라이브로 저장됩니다 */
+var DEFAULT_KEY = 'rLSiURAS3U';   /* 261002: 링크 배포 없이 주소만으로 메일 기능 작동 */
 var DEFAULT_SHEET = 'https://script.google.com/macros/s/AKfycbyz59Z3y2w0XOCMgYLZnd8Gf-tczgVVQnPkxfUJlL_zKp9YSWMsVDjpFfbfoGLHXDYONA/exec';
 var MAXPX = 1600;
 var AREAS = ['정부·공공','기업 ESG','투자·금융','협회·학계','미디어'];
@@ -576,6 +577,8 @@ var CFG = load('cs_cfg', {
 });
 if(!CFG.ocr) CFG.ocr='/api/ocr';
 if(!CFG.sheet && DEFAULT_SHEET) CFG.sheet=DEFAULT_SHEET;
+if(!CFG.key && DEFAULT_KEY) CFG.key=DEFAULT_KEY;
+CFG.d0core='draft';   /* 261002: D0 감사메일은 전부 Gmail 초안 */
 var DB = load('cs_people', []);
 var cur = null, curImg = null, frontImg = null, stream = null, camOK = false;
 var IMGQ = {};   /* 동기화 대기 중인 사진 (메모리) */
@@ -627,7 +630,6 @@ function renderHome(){
   var t=todayList(), core=t.filter(function(x){return x.tier==='핵심'}).length, off=t.filter(function(x){return x.official}).length;
   $('evLine').textContent=(CFG.event||'행사명을 설정에서 입력하세요')+' · '+(CFG.me||CFG.sname+' 대표');
   $('heroSum').innerHTML='오늘 만난 분 <b>'+t.length+'명</b> · 핵심 '+core+' · 공직자 '+off+(CFG.goalDay?' <span style="opacity:.7">/ 목표 '+CFG.goalDay+'</span>':'');
-  $('dashBtn').classList.toggle('hidden',!CFG.admin);
   /* 오늘 할 일 — 오늘 생성될 후속 초안 + 기한 임박 약속 */
   var now=new Date(), drafts={D3:0,D7:0,D14:0}, dueSoon=[];
   DB.forEach(function(x){
@@ -893,7 +895,7 @@ function renderGift(){
     '<label class="chk"><input type="checkbox" id="giftChk" '+(cur.giftOn?'checked':'')+' onchange="cur.giftOn=this.checked"> <span>제공 내역 기록</span></label>'+
     '<input class="etc" style="margin-top:8px;border-style:solid;background:#fff" value="'+esc(cur.giftItem)+'" oninput="cur.giftItem=this.value" placeholder="품목·수량 (예: 샘플 1세트)"></div>';
 }
-function d0Mode(){return (cur.tier==='핵심'&&CFG.d0core==='draft')?'draft':'send'}
+function d0Mode(){return 'draft'}
 function updateSaveBtn(){
   var b=$('saveBtn'),p=$('prevBtn');
   if(!validEmail(cur.email)){b.textContent='저장하기';p.classList.add('hidden');return}
@@ -992,7 +994,7 @@ function payload(rec){
   x.tier=rec.tier;x.priority=rec.tier;
   if(validEmail(rec.email)&&(rec.source!=='self'||true)){
     var m=buildMails(rec);if(rec.mailsEdited)Object.keys(rec.mailsEdited).forEach(function(k){m[k]=rec.mailsEdited[k]});
-    if(rec.source==='self'){x.mails={D0:m.D0};x.d0mode='send'}else{x.mails=m;x.d0mode=(rec.tier==='핵심'&&CFG.d0core==='draft')?'draft':'send'}
+    if(rec.source==='self'){x.mails={D0:m.D0};x.d0mode='draft'}else{x.mails=m;x.d0mode='draft'}
   }
   return x;
 }
@@ -1002,7 +1004,7 @@ function sync(rec,isNew){
   try{
     fetch(CFG.sheet,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:safeJSON(payload(rec))})
      .then(function(){var r=DB.find(function(x){return x.id===rec.id});if(r){r.synced=true;if(IMGQ[rec.id]){r.photo='saved';delete IMGQ[rec.id]}
-       if(isNew&&validEmail(r.email)&&CFG.key)r.d0=(r.source==='self'||!(r.tier==='핵심'&&CFG.d0core==='draft'))?'sent':'draft';save('cs_people',DB)}setSyncLine('ok')})
+       if(isNew&&validEmail(r.email)&&CFG.key)r.d0='draft';save('cs_people',DB)}setSyncLine('ok')})
      .catch(function(){setSyncLine('offline')});
   }catch(e){setSyncLine('offline')}
 }
@@ -1018,7 +1020,7 @@ function setSyncLine(st){
 function showDone(rec,isNew,isSelf){
   var who=(rec.name||rec.company)+(rec.role?' '+rec.role:'')+'님';
   var has=validEmail(rec.email)&&CFG.key&&CFG.sheet;
-  var mode=(rec.tier==='핵심'&&CFG.d0core==='draft'&&!isSelf)?'draft':'send';
+  var mode='draft';
   if(isSelf){$('doneTop').textContent='등록 완료';$('doneMsg').innerHTML='감사합니다!<br><span style="font-size:15px;font-weight:400;color:#CFC6B0">'+(validEmail(rec.email)?'곧 감사 메일을 보내 드릴게요.':'만나서 반가웠습니다.')+'</span>';
     setTimeout(function(){if($('done').classList.contains('active'))show('home')},5000)}
   else{
@@ -1092,6 +1094,15 @@ function renderFlow(){
 }
 
 /* ============ 대시보드 ============ */
+/* 261002: 대표님 PIN 6자리 → 전체 데이터 (서버에서 확인 · 5회 틀리면 10분 잠금) */
+function openDash(){if(CFG.admin){show('dash');return}
+  $('sheet').innerHTML='<h3>대표님 대시보드</h3><p class="meta">전체 스태프 데이터를 보려면 대표님 PIN 6자리를 입력하세요. 한 번 입력하면 이 기기에 기억돼요.</p><div class="pinRow"><input id="dashPin" type="password" inputmode="numeric" maxlength="6" style="width:200px;letter-spacing:.5em"></div><div class="row2"><button class="btn ghost" onclick="closeModal();show(\'dash\')">이 기기 것만 보기</button><button class="btn green" onclick="checkDashPin()">확인</button></div>';
+  openModal();setTimeout(function(){$('dashPin').focus()},200)}
+function checkDashPin(){var v=$('dashPin').value.trim();if(!/^\d{6}$/.test(v)){toast('숫자 6자리');return}
+  if(!CFG.sheet){toast('시트 연결이 없어요');return}
+  fetch(CFG.sheet+(CFG.sheet.indexOf('?')>-1?'&':'?')+'action=dash&a='+encodeURIComponent(v)+'&t='+Date.now()).then(function(r){return r.json()}).then(function(d){
+    if(d&&d.ok){CFG.admin=v;save('cs_cfg',CFG);closeModal();show('dash');toast('대표님 대시보드 연결')}else toast('PIN이 맞지 않아요 (5회 틀리면 10분 잠금)')
+  }).catch(function(){toast('오프라인이에요. 잠시 후 다시')})}
 var dashTimer=null,DASH=null;
 function loadDash(force){
   drawDash(DASH&&DASH.length?DASH:DB,!!(DASH&&DASH.length));
@@ -1104,7 +1115,7 @@ function loadDash(force){
   }).catch(function(){$('dashSrc').querySelector('span').textContent='오프라인 · 이 기기 데이터 표시 중'});
 }
 function drawDash(L,live){
-  var s=$('dashSrc');s.classList.toggle('live',live);s.querySelector('span').textContent=live?'전체 스태프 데이터 · 실시간 ('+new Date().toTimeString().slice(0,5)+')':(CFG.admin?'불러오는 중… · 이 기기 데이터':'이 기기 데이터만 표시 · 대표님 설정 링크로 열면 전체가 보여요');
+  var s=$('dashSrc');s.classList.toggle('live',live);s.querySelector('span').textContent=live?'전체 스태프 데이터 · 실시간 ('+new Date().toTimeString().slice(0,5)+')':(CFG.admin?'불러오는 중… · 이 기기 데이터':'이 기기 데이터만 표시 · 대시보드 버튼 → 대표님 PIN 입력하면 전체가 보여요');
   var now=new Date(),core=L.filter(function(x){return x.tier==='핵심'}).length;
   var soon=L.filter(function(x){if(!x.promise||!x.due||x.kept)return false;var d=dayDiff(new Date(x.due),now);return d<=3}).length;
   var old=L.filter(function(x){return (x.d0==='sent'||x.d0==='draft')&&dayDiff(now,new Date(x.ts))>=14}),rr=old.length?Math.round(old.filter(function(x){return x.replied}).length/old.length*100):null;
@@ -1134,7 +1145,7 @@ function initCfgForm(){
 }
 function saveCfg(){CFG.me=$('c-me').value.trim();CFG.event=$('c-event').value.trim();CFG.goalDay=parseInt($('c-goal').value,10)||0;
   CFG.sname=$('c-sname').value.trim();CFG.stitle=$('c-stitle').value.trim();CFG.sphone=$('c-sphone').value.trim();CFG.semail=$('c-semail').value.trim();save('cs_cfg',CFG);toast('저장했어요')}
-function toggleD0core(){CFG.d0core=CFG.d0core==='draft'?'send':'draft';save('cs_cfg',CFG);initCfgForm()}
+function toggleD0core(){toast('D0 메일은 전부 Gmail 초안으로 고정돼 있어요')}
 function testConn(){
   if(!CFG.sheet){toast('먼저 설정 링크로 연결해 주세요');return}
   fetch(CFG.sheet+(CFG.sheet.indexOf('?')>-1?'&':'?')+'t='+Date.now()).then(function(r){return r.json()}).then(function(d){toast(d&&d.ok?'연결 정상 · '+d.app+' '+d.version:'응답 이상')}).catch(function(){toast('연결 실패 — 배포 주소를 확인하세요')});
